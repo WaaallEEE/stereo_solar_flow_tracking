@@ -15,8 +15,8 @@ print(sys.path)
 print(os.getcwd())
 print(__file__)
 print(os.path.dirname(__file__))
-plt.rcParams.update({'font.size': 12})
-dpi = 168
+plt.rcParams.update({'font.size': 16})
+dpi = 120
 DTYPE = np.float32
 
 
@@ -44,11 +44,16 @@ def make_ell_points(xc, yc, rx, ry, imshape):
     return ell_x, ell_y
 
 
-def make_label_mask(surface_inv, ycen, xcen, sig_b, sig_a):
+def make_ellipse_points(ycen, xcen, sig_b, sig_a):
     rad_x = sig_a * np.sqrt(2)
     rad_y = sig_b * np.sqrt(2)
     ell = Ellipse((xcen, ycen), rad_x * 2, rad_y * 2, linewidth=1, fill=False, color='green', linestyle='-')
     ell_x, ell_y = make_ell_points(xcen, ycen, rad_x, rad_y, image.shape)
+    return ell, ell_x, ell_y
+
+
+def make_label_mask(surface_inv, ycen, xcen, sig_b, sig_a):
+    ell, ell_x, ell_y = make_ellipse_points(ycen, xcen, sig_b, sig_a)
     label_mask = np.zeros(image.shape, dtype=np.int64)
     label_mask[ell_y, ell_x] = 1
     peak = peak_local_max(surface_inv, labels=label_mask, num_peaks_per_label=1)
@@ -60,83 +65,20 @@ datadir = PurePath(os.environ['DATA'], 'STEREO/L7tum/prep_fits')
 outputdir = PurePath(os.environ['DATA'], 'STEREO/L7tum/')
 datafiles = sorted(glob.glob(str(PurePath(datadir, '*.fits'))))
 nframes = 10
+# Blob intensity detection threshold for the DOG algorithm
 blob_thresh = 1.0
+# Maximum overlap allowed between blobs
 overlap = 0.6
+# Thresholds for the local maxima location within the ellipses. Reject maxima beyond these relative values
+xrel_thresh = 0.8
+yrel_thresh = 0.5
 # Toggle blob detection: if false, will load existing files
 detect_blob = False
 # Toggle 1st / 2nd selection pass
 first_select = True
-do_plot = True
+do_plot = False
 
-if first_select:
-    targets = []
-else:
-    targets = np.load(PurePath(outputdir, 'training_set', 'targets.npy'))
-
-peaks_time_series = []
-for n in range(0, nframes):
-    print('Frame n= ', n)
-    # n = 0
-    # Load the image at the current time index
-    image = fitstools.fitsread(datafiles[n], cube=False)
-    surface_inv = -mblt.prep_data(image)
-    if detect_blob:
-        blobs_d = blob_dog(surface_inv, overlap=overlap, threshold=blob_thresh, min_sigma=[5, 1], max_sigma=[20, 10])
-        np.save(PurePath(outputdir, 'training_set', f'blobs_{n:02d}.npy'), blobs_d)
-    else:
-        blobs_d = np.load(PurePath(outputdir, 'training_set', f'blobs_{n:02d}.npy'))
-
-    plt.close('all')
-    if do_plot:
-        fig, axs = plt.subplots(figsize=(16, 14))
-        im = axs.imshow(surface_inv, vmin=0, vmax=3, origin='lower', cmap='Greys')
-        axs.set_xlim([0, 600])
-        axs.set_ylim([0, 659])
-        axs.set_xlabel('Azimuth [px] - 1px = 0.1 deg')
-        axs.set_ylabel('Radial distance [px]')
-        cbar = add_colorbar(axs, im)
-        plt.tight_layout()
-
-    if first_select:
-        figure_fname = PurePath(outputdir, 'training_set/figures', f'training_frame_v1_{n:03d}.jpg')
-    else:
-        figure_fname = PurePath(outputdir, 'training_set/figures', f'training_frame_v2_{n:03d}.jpg')
-
-    peaks = []
-    for i, blob in enumerate(blobs_d):
-        if i not in targets:
-            yc, xc, b, a = blob
-
-            peak, ell = make_label_mask(surface_inv, yc, xc, b, a)
-            if do_plot:
-                axs.add_artist(ell)
-            # Only consider if close enough from the geometric center of the ellipse
-            if len(peak) > 0:
-                peaks.append(peak[0])
-                ypeak, xpeak = peak[0]
-
-                if do_plot:
-                    axs.plot(xpeak, ypeak, 'r+')
-                    # print(i, xc, yc, a, b)
-                    ry = b * np.sqrt(2)
-                    rx = a * np.sqrt(2)
-                    xrel = abs(peak[0][1] - xc)/rx
-                    yrel = abs(peak[0][0] - yc)/ry
-                    if xrel <= 0.8 and yrel <= 0.5:
-                        axs.text(xc+1, yc+1, str(i), color='black', fontsize=10,
-                                 bbox=dict(facecolor='yellow', alpha=0.4, edgecolor='black', pad=1), clip_on=True)
-            else:
-                peaks.append(np.array([np.NaN, np.NaN]))
-        else:
-            peaks.append(np.array([np.NaN, np.NaN]))
-    if do_plot:
-        plt.savefig(figure_fname)
-        plt.close()
-
-    peaks = np.array(peaks)
-    peaks_time_series.append(peaks)
-
-targets = np.array([
+targets_1 = np.array([
     [21, 27, 32, 42, 59, 100, 185, 358, 643, 1155],
     [52, 70, 92, 97, 93, 75, 66, 56, 55, 53],
     [159, 141, 148, 157, 165, 164, 170, 181, 174, 167],
@@ -159,16 +101,116 @@ targets = np.array([
     [739, 654, 618, 620, 617, 610, 604, 695, 776, 942]
 ])
 
-np.save(PurePath(outputdir, 'training_set', 'targets'), targets)
+np.save(str(PurePath(outputdir, 'training_set', 'targets')), targets_1)
 
+if first_select:
+    targets = []
+else:
+    targets = targets_1
+
+peaks_time_series = []
+blobs_time_series = []
+for n in range(0, nframes):
+    print('Frame n= ', n)
+    # n = 0
+    # Load the image at the current time index
+    image = fitstools.fitsread(datafiles[n], cube=False)
+    surface_inv = -mblt.prep_data(image)
+    if detect_blob:
+        blobs_d = blob_dog(surface_inv, overlap=overlap, threshold=blob_thresh, min_sigma=[5, 1], max_sigma=[20, 10])
+        np.save(PurePath(outputdir, 'training_set', f'blobs_{n:02d}.npy'), blobs_d)
+    else:
+        blobs_d = np.load(PurePath(outputdir, 'training_set', f'blobs_{n:02d}.npy'))
+
+    plt.close('all')
+    if do_plot:
+        fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(24, 13))
+        im0 = axs[0].imshow(surface_inv, vmin=0, vmax=3, origin='lower', cmap='Greys')
+        im1 = axs[1].imshow(surface_inv, vmin=0, vmax=3, origin='lower', cmap='Greys')
+        for i in range(2):
+            axs[i].set_xlim([0, 600])
+            axs[i].set_ylim([0, 659])
+            axs[i].set_xlabel('Azimuth [px] - 1px = 0.1 deg')
+            axs[i].set_ylabel('Radial distance [px]')
+
+        cbar = add_colorbar(axs[1], im1)
+        plt.tight_layout()
+
+    if first_select:
+        figure_fname = PurePath(outputdir, 'training_set/figures', f'training_frame_v1_{n:03d}.jpg')
+    else:
+        figure_fname = PurePath(outputdir, 'training_set/figures', f'training_frame_v2_{n:03d}.jpg')
+
+    peaks = []
+    selected_blobs = []
+    for i, blob in enumerate(blobs_d):
+        if i not in targets:
+            yc, xc, sig_b, sig_a = blob
+            peak, ell = make_label_mask(surface_inv, yc, xc, sig_b, sig_a)
+            if do_plot:
+                axs[0].add_artist(ell)
+            # Only consider if close enough from the geometric center of the ellipse
+            if len(peak) > 0:
+                peaks.append(peak[0])
+                ypeak, xpeak = peak[0]
+                selected_blobs.append(blob)
+
+                if do_plot:
+                    axs[0].plot(xpeak, ypeak, 'r+')
+                    axs[0].set_title('L7TUM + fitted blobs')
+                    # print(i, xc, yc, a, b)
+                    ry = sig_b * np.sqrt(2)
+                    rx = sig_a * np.sqrt(2)
+                    xrel = abs(peak[0][1] - xc)/rx
+                    yrel = abs(peak[0][0] - yc)/ry
+                    if xrel <= 0.8 and yrel <= 0.5:
+                        axs[0].text(xc+2, yc+2, str(i), color='black', fontsize=10,
+                                    bbox=dict(facecolor='yellow', alpha=0.4, edgecolor='black', pad=1), clip_on=True)
+                        if i in targets_1[:, n]:
+                            ell = Ellipse((xc, yc), rx * 2, ry * 2, lw=1, fill=False, color='green', ls='-')
+                            axs[1].add_artist(ell)
+                            axs[1].plot(xpeak, ypeak, 'r+')
+                            axs[1].text(xc + 2, yc + 2, str(i), color='black', fontsize=10,
+                                        bbox=dict(facecolor='yellow', alpha=0.4, edgecolor='black', pad=1),
+                                        clip_on=True)
+                            axs[1].set_title('L7TUM + selected blobs (training set)')
+            else:
+                peaks.append(np.array([np.NaN, np.NaN]))
+        else:
+            peaks.append(np.array([np.NaN, np.NaN]))
+
+    if do_plot:
+        plt.savefig(figure_fname, dpi=dpi)
+        plt.close()
+
+    peaks = np.array(peaks)
+    selected_blobs = np.array(selected_blobs)
+    peaks_time_series.append(peaks)
+    blobs_time_series.append(selected_blobs)
+    # TODO: consider using the local maxima only as a quality metric for the blob quality itself.
+    #  And blob ellipse center for the error dvx, dvy
+#
+
+targets = targets_1
 
 df = pd.DataFrame(columns=['frame', 'blob_id_init', 'blob_id', 'x', 'y'])
 
-for n, peaks in enumerate(peaks_time_series):
+for n, (peaks, blobs) in enumerate(zip(peaks_time_series, blobs_time_series)):
     frame = n
     targets_n = targets[:, n]
     ypeak, xpeak = zip(*peaks[targets_n])
-    dict_ = {'frame': n, 'blob_id_init': targets[:,0], 'blob_id': targets_n, 'x': xpeak, 'y': ypeak}
+    yc, xc, sig_b, sig_a = zip(*blobs[targets_n])
+    dict_ = {'frame': n,
+             'blob_id_init': targets[:, 0],
+             'blob_id': targets_n,
+             'xblob': xc,
+             'yblob': yc,
+             'sig_b': sig_b,
+             'sig_a': sig_a,
+             'x': xpeak,
+             'y': ypeak,
+             }
+
     df_ = pd.DataFrame(dict_)
     df = pd.concat([df, df_], ignore_index=True)
 
