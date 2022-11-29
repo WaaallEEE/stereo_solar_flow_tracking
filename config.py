@@ -1,7 +1,6 @@
 import os
 import glob
 from pathlib import PurePath
-from . import toolbox
 
 DATA_DIR = PurePath(os.environ['DATA'], 'STEREO/L7tum/')
 

@@ -3,8 +3,8 @@ from pathlib import PurePath
 import pandas as pd
 import numpy as np
 from sunflower.balltracking import mballtrack as mblt
-from stereo_flow_tracking import toolbox
-from stereo_flow_tracking import config
+from stereo_solar_flow_tracking import toolbox
+from stereo_solar_flow_tracking import config
 
 
 if __name__ == '__main__':
