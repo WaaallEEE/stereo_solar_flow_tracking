@@ -76,7 +76,7 @@ yrel_thresh = 0.5
 detect_blob = False
 # Toggle 1st / 2nd selection pass
 first_select = True
-do_plot = False
+do_plot = True
 
 targets_1 = np.array([
     [21, 27, 32, 42, 59, 100, 185, 358, 643, 1155],
@@ -127,6 +127,8 @@ for n in range(0, nframes):
         fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(24, 13))
         im0 = axs[0].imshow(surface_inv, vmin=0, vmax=3, origin='lower', cmap='Greys')
         im1 = axs[1].imshow(surface_inv, vmin=0, vmax=3, origin='lower', cmap='Greys')
+        axs[0].set_title(f'L7TUM fitted blobs - Frame #{n} - Elapsed time = {n * 5} min')
+        axs[1].set_title(f'Selected blobs (training set) - Elapsed time = {n * 5} min')
         for i in range(2):
             axs[i].set_xlim([0, 600])
             axs[i].set_ylim([0, 659])
@@ -153,11 +155,10 @@ for n in range(0, nframes):
             if len(peak) > 0:
                 peaks.append(peak[0])
                 ypeak, xpeak = peak[0]
-                selected_blobs.append(blob)
+                # selected_blobs.append(blob)
 
                 if do_plot:
                     axs[0].plot(xpeak, ypeak, 'r+')
-                    axs[0].set_title('L7TUM + fitted blobs')
                     # print(i, xc, yc, a, b)
                     ry = sig_b * np.sqrt(2)
                     rx = sig_a * np.sqrt(2)
@@ -173,9 +174,10 @@ for n in range(0, nframes):
                             axs[1].text(xc + 2, yc + 2, str(i), color='black', fontsize=10,
                                         bbox=dict(facecolor='yellow', alpha=0.4, edgecolor='black', pad=1),
                                         clip_on=True)
-                            axs[1].set_title('L7TUM + selected blobs (training set)')
+
             else:
                 peaks.append(np.array([np.NaN, np.NaN]))
+
         else:
             peaks.append(np.array([np.NaN, np.NaN]))
 
@@ -184,9 +186,8 @@ for n in range(0, nframes):
         plt.close()
 
     peaks = np.array(peaks)
-    selected_blobs = np.array(selected_blobs)
     peaks_time_series.append(peaks)
-    blobs_time_series.append(selected_blobs)
+    blobs_time_series.append(blobs_d)
     # TODO: consider using the local maxima only as a quality metric for the blob quality itself.
     #  And blob ellipse center for the error dvx, dvy
 #

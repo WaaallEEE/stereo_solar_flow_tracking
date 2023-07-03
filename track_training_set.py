@@ -3,8 +3,8 @@ from pathlib import PurePath
 import pandas as pd
 import numpy as np
 from sunflower.balltracking import mballtrack as mblt
-from stereo_solar_flow_tracking import toolbox
-from stereo_solar_flow_tracking import config
+import toolbox
+import config
 
 
 if __name__ == '__main__':
@@ -19,18 +19,7 @@ if __name__ == '__main__':
     # config dictionnary for the parameters that aren't subject to parameter sweeps
     mbt_fixed_params = config.mbt_dict
     # Ball params that can be subject to parameter sweep
-    ball_params = {
-        "rs": 4,
-        "am": 1,
-        "dp": 0.3,
-        "tdx": 1,
-        "tdy": 100,
-        "zdamping": 1,
-        "ballspacing": 15,
-        "intsteps": 20,
-        "mag_thresh": 3.5,
-        "noise_level": 2
-    }
+    ball_params = config.ball_params
 
     mbt = mblt.MBT(init_pos=init_target_pos, **ball_params, **mbt_fixed_params)
     mbt.track_all_frames()
@@ -42,6 +31,21 @@ if __name__ == '__main__':
         df_targets.loc[df_targets['frame'] == i, 'ball_y'] = mbt.ballpos[1, :, i]
 
     df_targets.to_csv(PurePath(config.OUTPUT_DIR, 'df_targets.csv'), index=False)
+
+    # Calculate velocities
+    # Get the time series individually for each ball
+    keep = mbt.balls_age_t[:, -1] > 3
+    nballs = keep.sum()
+    pos = mbt.ballpos[:, keep, :]
+    valid_masks = mbt.valid_balls_mask_t[keep, :]
+    delta_pos = np.zeros([nballs, 3])
+    for b in range(0, nballs):
+        bpos = pos[:, b, valid_masks[b, :]]
+        delta_pos[b, :] = bpos[:, -1] - bpos[:, 0]
+
+    vel_mean = delta_pos.mean(axis=0) * config.VUNIT/9
+    print(vel_mean)
+
 
     # Export figures
     if print_figures:
